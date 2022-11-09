@@ -4,15 +4,15 @@
 ## Genesis Configuration
 CREDIT_AMOUNT=3500000000000uheart
 BOUND_AMOUNT=2500000000000uheart
-VALIDATOR_COUNT=3
+VALIDATOR_COUNT=15
 CHAIN_ID=testnet-1
 
 ## Docker configuration
 IMAGE_TAG=testnet-v1
-NETWORK_CIDR=192.168.100
-NETWORK_STARTING_IP=100
-NETWORK_SUBNET=192.168.100.0/24
-NETWORK_GATEWAY=192.168.100.1
+NETWORK_CIDR=45.136.40
+NETWORK_STARTING_IP=6
+NETWORK_SUBNET=45.136.40.0/22
+NETWORK_GATEWAY=45.136.40.1
 #
 echo 'Building docker image'
 docker build -t 0x4139/humansd:$IMAGE_TAG . &>/dev/null
@@ -20,9 +20,9 @@ docker build -t 0x4139/humansd:$IMAGE_TAG . &>/dev/null
 # Cleanup
 rm -rf $(pwd)/config/*
 rm -rf $(pwd)/gentx/*
-rm $(pwd)/genesis.json
+rm $(pwd)/genesis.json &>/dev/null
 cp $(pwd)/genesis-orig.json $(pwd)/genesis.json &>/dev/null
-docker rm -f $(docker container ls -q --filter name=$CHAIN_ID-validator-) &>/dev/null
+docker rm -f $(docker container ps -aq --filter name=$CHAIN_ID-validator-) &>/dev/null
 docker network rm $CHAIN_ID-network &>/dev/null
 #
 
@@ -31,6 +31,7 @@ docker network create \
   --driver='bridge' \
   --subnet=$NETWORK_SUBNET \
   --gateway=$NETWORK_GATEWAY \
+  --opt "com.docker.network.bridge.name"="testnet-bridge" \
   $CHAIN_ID-network &>/dev/null
 echo "Created bridge network"
 
@@ -87,15 +88,22 @@ docker run \
 echo "[Genesis Generated] - for $VALIDATOR_COUNT validators !"
 
 for i in $(eval echo {1..$VALIDATOR_COUNT}); do
-  # create validator key
+  # enable api at line 117
+  sed -i '117s/.*/enable = true/' $(pwd)/config/validator-$i/config/app.toml
+  # enable cors for the api enabled-unsafe-cors = false
+  sed -i '138s/.*/enabled-unsafe-cors = true/' $(pwd)/config/validator-$i/config/app.toml
+
+  # create validator node
   docker run \
     --detach \
+    --restart always \
     --name $CHAIN_ID-validator-$i \
     --network $CHAIN_ID-network \
     --ip "$NETWORK_CIDR.$(($NETWORK_STARTING_IP + $i))" \
     -v $(pwd)/config/validator-$i:/root/.humans \
     -v $(pwd)/genesis.json:/root/.humans/config/genesis.json \
-    0x4139/humansd:$IMAGE_TAG /opt/humans/humansd start
+    0x4139/humansd:$IMAGE_TAG /opt/humans/humansd start \
+     --rpc.laddr tcp://0.0.0.0:26657 \
   echo "[Validator Started] - $i"
 
 done
